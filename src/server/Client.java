@@ -14,13 +14,13 @@ public class Client {
 	private volatile Boolean loggedIn; // true if login is successful
 	private User myUser;
 	private List<Object> myGroups = new ArrayList<>(); // stores Group and DirectMessage objects
-	
+
 	// Static instance for GUI access
 	private static Client instance;
-	
+
 	// GUI update callback (set by TeamChatApp)
 	private Runnable groupUpdateCallback = null;
-	
+
 	public Client(ObjectOutputStream out, ObjectInputStream in) {
 		this.out = out;
 		this.in = in;
@@ -31,22 +31,23 @@ public class Client {
 	 * Creates and initializes a Client instance connected to the server.
 	 * This method can be called from GUI applications to get a connected Client.
 	 */
-	public static Client createAndConnect() {
+	public static Client createAndConnect(string hostInit) {
 		try {
 			int port = 12345;
-			String host = InetAddress.getLocalHost().getHostName();
+			//"134.154.55.115"
+			String host = hostInit;
 			Socket socket = new Socket(host, port);
-			
+
 			ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream());
 			ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
-			
+
 			Client client = new Client(out, in);
 			instance = client; // set static instance for GUI access
 			PacketHandler packetHandler = new PacketHandler(client);
-			
+
 			// start listening thread for incoming packets
 			client.startListening(packetHandler);
-			
+
 			// small delay to ensure listener thread is ready
 			Thread.sleep(200);
 			return client;
@@ -64,10 +65,10 @@ public class Client {
 		if (client == null) {
 			return;
 		}
-		
+
 		// TODO: REMOVE THIS BEFORE PRODUCTION - Test mode only
 		// Running test mode - comment out or remove this line when done testing
-		//client.runTestMode();
+		// client.runTestMode();
 
 		// Keep running to allow message receiving
 		// GUI will call client.sendLogin(), client.sendMessage(), etc.
@@ -107,7 +108,6 @@ public class Client {
 		// clears
 		out.flush();
 	}// verify new message and send the same message back to add to chat
-	
 
 	// ************************************************************
 	// SENDING LOGIN
@@ -128,9 +128,10 @@ public class Client {
 		// clears
 		out.flush();
 	}// add server sending a user.
-	// ************************************************************
-	// SENDING LOGOUT
-	// ************************************************************
+		// ************************************************************
+		// SENDING LOGOUT
+		// ************************************************************
+
 	public void sendLogout() throws IOException {
 		List<LoginInfo> empty = new ArrayList<>();
 		Packet logoutRequest = new Packet(Type.LOGOUT, "REQUEST", List.of(empty));
@@ -139,18 +140,18 @@ public class Client {
 		// clears
 		out.flush();
 	}
-	
-	//request user messages (Admin feature)
-	//requests all messages sent by a specific user
+
+	// request user messages (Admin feature)
+	// requests all messages sent by a specific user
 	public void requestUserMessages(String username) throws IOException {
 		Packet requestPacket = new Packet(Type.GROUP, "REQUEST", List.of(username));
 		out.writeObject(requestPacket);
 		out.flush();
 	}
-	
-	//store for user messages received from server
+
+	// store for user messages received from server
 	private Map<String, List<Message>> userMessagesCache = new HashMap<>();
-	
+
 	public synchronized List<Message> getUserMessages(String username) {
 		return userMessagesCache.get(username);
 	}
@@ -158,32 +159,33 @@ public class Client {
 	public synchronized void setUserMessages(String username, List<Message> messages) {
 		userMessagesCache.put(username, messages);
 	}
+
 	public synchronized void setMyUser(User user) {
 		this.myUser = user;
 		this.loggedIn = user != null;
 	}
-	
+
 	public synchronized User getMyUser() {
 		return myUser;
 	}
-	
+
 	public boolean isLoggedIn() {
 		return Boolean.TRUE.equals(loggedIn);
 	}
-	
-	 //sets the list of groups/direct messages for this client
+
+	// sets the list of groups/direct messages for this client
 	public synchronized void setMyGroups(List<Object> groups) {
 		if (groups == null) {
 			groups = new ArrayList<>();
 		}
-		
-		//for each incoming group, check if we should replace existing
-		//build a map of existing groups by UID for quick lookup
-		//quick easy way to find groups messages, mapping them to their UID
+
+		// for each incoming group, check if we should replace existing
+		// build a map of existing groups by UID for quick lookup
+		// quick easy way to find groups messages, mapping them to their UID
 		Map<Integer, Object> existingGroupsMap = new HashMap<>();
 		Map<Integer, Integer> existingMessageCounts = new HashMap<>();
 		Map<Integer, Integer> oldMessageCounts = new HashMap<>();
-		
+
 		for (Object existing : myGroups) {
 			if (existing instanceof Group) {
 				Group g = (Group) existing;
@@ -197,16 +199,16 @@ public class Client {
 				oldMessageCounts.put(dm.getChatUID(), dm.getMessage().size());
 			}
 		}
-		
-		//completely clear existing groups
+
+		// completely clear existing groups
 		this.myGroups.clear();
-		
-		//repopulate, but only use incoming groups if they have same or more messages
+
+		// repopulate, but only use incoming groups if they have same or more messages
 		for (Object incoming : groups) {
 			boolean shouldAdd = true;
 			int incomingUID = -1;
 			int incomingCount = 0;
-			
+
 			if (incoming instanceof Group) {
 				Group g = (Group) incoming;
 				incomingUID = g.getGroupUID();
@@ -216,37 +218,37 @@ public class Client {
 				incomingUID = dm.getChatUID();
 				incomingCount = dm.getMessage().size();
 			}
-			
+
 			if (existingMessageCounts.containsKey(incomingUID)) {
 				int existingCount = existingMessageCounts.get(incomingUID);
 				if (incomingCount < existingCount) {
-					//incoming is stale - keep existing
+					// incoming is stale - keep existing
 					this.myGroups.add(existingGroupsMap.get(incomingUID));
 					shouldAdd = false;
 				}
 			}
-			
+
 			if (shouldAdd) {
 				this.myGroups.add(incoming);
 			}
 		}
-		
-		//set lastUpdatedGroup to first group (or null if empty) 
+
+		// set lastUpdatedGroup to first group (or null if empty)
 		if (this.myGroups != null && !this.myGroups.isEmpty()) {
 			lastUpdatedGroup = this.myGroups.get(0);
 		} else {
 			lastUpdatedGroup = null;
 		}
 		notifyGroupUpdate();
-		
-		//check for new messages and show notifications
+
+		// check for new messages and show notifications
 		if (myUser != null) {
 			String currentUser = myUser.getUsername();
 			for (Object groupObj : this.myGroups) {
 				Message lastMessage = null;
 				int oldCount = 0;
 				int newCount = 0;
-				
+
 				if (groupObj instanceof Group) {
 					Group g = (Group) groupObj;
 					newCount = g.getMessages().size();
@@ -262,8 +264,8 @@ public class Client {
 						lastMessage = dm.getMessage().get(newCount - 1);
 					}
 				}
-				
-				//show notification if there's a new message from another user
+
+				// show notification if there's a new message from another user
 				if (lastMessage != null && !lastMessage.getSender().equals(currentUser)) {
 					try {
 						Class<?> notifyClass = Class.forName("User.webpages.Notify");
@@ -275,43 +277,43 @@ public class Client {
 			}
 		}
 	}
-	
-	//gets the list of groups/direct messages for this client
+
+	// gets the list of groups/direct messages for this client
 	public synchronized List<Object> getMyGroups() {
 		return new ArrayList<>(myGroups); // Return copy to prevent external modification
 	}
-	
-	//store last updated group for GUI notification
+
+	// store last updated group for GUI notification
 	private Object lastUpdatedGroup = null;
-	
-	//updates or adds a group/direct message to the client's list
-	//only replaces if incoming group has same or more messages 
+
+	// updates or adds a group/direct message to the client's list
+	// only replaces if incoming group has same or more messages
 	public synchronized void updateGroup(Object groupObj) {
 		if (groupObj == null) {
 			return;
 		}
-		
-		//find and replace existing group, or add new one
+
+		// find and replace existing group, or add new one
 		boolean found = false;
 		boolean shouldReplace = true;
 		Message lastMessage = null;
 		int existingCount = 0;
 		int newCount = 0;
-		
+
 		for (int i = 0; i < myGroups.size(); i++) {
 			Object existing = myGroups.get(i);
 			if (existing instanceof Group && groupObj instanceof Group) {
 				Group existingGroup = (Group) existing;
 				Group newGroup = (Group) groupObj;
 				if (existingGroup.getGroupUID() == newGroup.getGroupUID()) {
-					//check message count 
+					// check message count
 					existingCount = existingGroup.getMessages().size();
 					newCount = newGroup.getMessages().size();
 					if (newCount < existingCount) {
 						shouldReplace = false;
-						return; //don't replace with stale data
+						return; // don't replace with stale data
 					}
-					//check if there's a new message (not on initial load)
+					// check if there's a new message (not on initial load)
 					if (newCount > existingCount && newCount > 0) {
 						lastMessage = newGroup.getMessages().get(newCount - 1);
 					}
@@ -323,14 +325,14 @@ public class Client {
 				DirectMessage existingDM = (DirectMessage) existing;
 				DirectMessage newDM = (DirectMessage) groupObj;
 				if (existingDM.getChatUID() == newDM.getChatUID()) {
-					//check message count 
+					// check message count
 					existingCount = existingDM.getMessage().size();
 					newCount = newDM.getMessage().size();
 					if (newCount < existingCount) {
 						shouldReplace = false;
-						return; //don't replace with stale data
+						return; // don't replace with stale data
 					}
-					//check if there's a new message (not on initial load)
+					// check if there's a new message (not on initial load)
 					if (newCount > existingCount && newCount > 0) {
 						lastMessage = newDM.getMessage().get(newCount - 1);
 					}
@@ -340,16 +342,16 @@ public class Client {
 				}
 			}
 		}
-		
+
 		if (!found) {
 			myGroups.add(groupObj);
 		}
-		
+
 		if (shouldReplace) {
 			lastUpdatedGroup = groupObj;
 			notifyGroupUpdate();
-			
-			//show notification if there's a new message from another user
+
+			// show notification if there's a new message from another user
 			if (lastMessage != null && myUser != null) {
 				String sender = lastMessage.getSender();
 				String currentUser = myUser.getUsername();
@@ -364,13 +366,13 @@ public class Client {
 			}
 		}
 	}
-	
-	//gets the last updated group (for GUI notifications)
+
+	// gets the last updated group (for GUI notifications)
 	public synchronized Object getLastUpdatedGroup() {
 		return lastUpdatedGroup;
 	}
-	
-	//gets a Group by its UID
+
+	// gets a Group by its UID
 	public synchronized Group getGroupById(int groupUID) {
 		for (Object groupObj : myGroups) {
 			if (groupObj instanceof Group) {
@@ -382,8 +384,8 @@ public class Client {
 		}
 		return null;
 	}
-	
-	//gets a DirectMessage by its chat UID
+
+	// gets a DirectMessage by its chat UID
 	public synchronized DirectMessage getDirectMessageById(int chatUID) {
 		for (Object groupObj : myGroups) {
 			if (groupObj instanceof DirectMessage) {
@@ -395,17 +397,17 @@ public class Client {
 		}
 		return null;
 	}
-	
-	//gets a group or direct message by participant list (order-independent)
+
+	// gets a group or direct message by participant list (order-independent)
 	public synchronized Object getGroupByParticipants(List<String> participants) {
 		if (participants == null || participants.isEmpty()) {
 			return null;
 		}
-		
-		//sort participants for comparison
+
+		// sort participants for comparison
 		List<String> sortedParticipants = new ArrayList<>(participants);
 		Collections.sort(sortedParticipants);
-		
+
 		for (Object groupObj : myGroups) {
 			List<String> groupParticipants;
 			if (groupObj instanceof Group) {
@@ -415,7 +417,7 @@ public class Client {
 			} else {
 				continue;
 			}
-			
+
 			Collections.sort(groupParticipants);
 			if (sortedParticipants.equals(groupParticipants)) {
 				return groupObj;
@@ -423,24 +425,24 @@ public class Client {
 		}
 		return null;
 	}
-	
+
 	public void startListening(PacketHandler packetHandler) {
 		Thread listener = new Thread(() -> {
 			try {
 				while (true) {
 					Packet packet = (Packet) in.readObject();
-					
+
 					Object result = packetHandler.handlePacket(packet);
-					
-					//if this was a GROUP packet, trigger immediate GUI refresh
+
+					// if this was a GROUP packet, trigger immediate GUI refresh
 					if (packet.getType().equals(server.Type.GROUP)) {
 						String status = packet.getStatus();
 						if ("ALL".equalsIgnoreCase(status) || "UPDATE".equalsIgnoreCase(status)) {
-							//give a small delay then trigger refresh to ensure GUI is ready
+							// give a small delay then trigger refresh to ensure GUI is ready
 							try {
 								Thread.sleep(100);
 							} catch (InterruptedException ie) {
-								//ignore
+								// ignore
 							}
 							notifyGroupUpdate();
 						}
@@ -451,21 +453,21 @@ public class Client {
 			} catch (Exception e) {
 			}
 		});
-		listener.setDaemon(true); // closes when main ends 
+		listener.setDaemon(true); // closes when main ends
 		listener.start();
 	}
-	
-	//gets the current Client instance for GUI access
+
+	// gets the current Client instance for GUI access
 	public static Client getInstance() {
 		return instance;
 	}
-	
-	//sets a callback to be invoked when groups are updated
+
+	// sets a callback to be invoked when groups are updated
 	public synchronized void setGroupUpdateCallback(Runnable callback) {
 		this.groupUpdateCallback = callback;
 	}
-	
-	//notifies the GUI that groups have been updated
+
+	// notifies the GUI that groups have been updated
 	private synchronized void notifyGroupUpdate() {
 		if (groupUpdateCallback != null) {
 			try {
